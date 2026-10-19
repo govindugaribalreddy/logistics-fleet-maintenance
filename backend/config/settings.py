@@ -50,6 +50,7 @@ if os.getenv("POSTGRES_HOST"):
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
     }}
 else:
+    # Keep standalone local checks/tests lightweight; Compose always sets POSTGRES_HOST=db.
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
 
 AUTH_PASSWORD_VALIDATORS = []

@@ -32,4 +32,45 @@ cd backend && python manage.py check && pytest
 cd frontend && npm test && npm run build
 ```
 
-PostgreSQL settings are prepared through environment variables but are not started or connected by this setup. Fleet features, models, authentication, and Celery are intentionally not included yet.
+## PostgreSQL and Docker Compose
+
+The development Compose stack runs PostgreSQL as `db` and Django as `web`. Django connects to PostgreSQL using the Compose service name `db`; database data is persisted in the `postgres_data` volume.
+
+Create a local `.env` from `.env.example` and replace the placeholder secret/password values if desired:
+
+```bash
+cp .env.example .env
+```
+
+Start the database and Django service:
+
+```bash
+docker compose up --build
+```
+
+The Django container waits for PostgreSQL to become healthy, runs migrations, and serves the API at `http://localhost:8000`. To initialize or rerun migrations manually:
+
+```bash
+docker compose run --rm web python manage.py migrate
+```
+
+Run backend checks and tests in the Compose Django environment:
+
+```bash
+docker compose run --rm web python manage.py check
+docker compose run --rm web pytest
+```
+
+Stop the services while preserving the database volume:
+
+```bash
+docker compose down
+```
+
+To remove the persisted development database as well:
+
+```bash
+docker compose down -v
+```
+
+Redis, RabbitMQ, Celery, Prometheus, and Grafana are intentionally not included yet. Fleet features, database models, and authentication are also not included.
