@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -57,7 +59,7 @@ class MaintenanceType(models.Model):
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True)
     mileage_interval = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
-    engine_hour_interval = models.DecimalField(null=True, blank=True, max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
+    engine_hour_interval = models.DecimalField(null=True, blank=True, max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     calendar_interval_days = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
