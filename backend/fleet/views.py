@@ -4,6 +4,7 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 
 from .models import MaintenanceType, ServiceRecord, Technician, Vehicle
 from .pagination import FleetPagination
+from .permissions import FleetRolePermission, has_role, TECHNICIAN
 from .serializers import MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleSerializer
 
 
@@ -21,6 +22,7 @@ class VehicleViewSet(viewsets.ModelViewSet):
     search_fields = ("vehicle_identifier", "vin", "make", "model", "license_plate")
     ordering_fields = ("vehicle_identifier", "make", "model", "year", "mileage", "created_at")
     ordering = ("vehicle_identifier",)
+    permission_classes = (FleetRolePermission,)
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -48,6 +50,7 @@ class TechnicianViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = (SearchFilter, OrderingFilter)
     search_fields = ("name", "email", "phone", "skills")
     ordering_fields = ("name", "email", "created_at")
+    permission_classes = (FleetRolePermission,)
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -64,6 +67,7 @@ class MaintenanceTypeViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = (SearchFilter, OrderingFilter)
     search_fields = ("name", "description")
     ordering_fields = ("name", "created_at")
+    permission_classes = (FleetRolePermission,)
 
 
 class ServiceRecordViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -73,9 +77,12 @@ class ServiceRecordViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, views
     filter_backends = (OrderingFilter,)
     ordering_fields = ("service_date", "mileage", "total_cost", "created_at")
     ordering = ("-service_date", "-created_at")
+    permission_classes = (FleetRolePermission,)
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        if has_role(self.request.user, TECHNICIAN):
+            queryset = queryset.filter(technician__email__iexact=self.request.user.email)
         for field in ("vehicle", "service_type", "technician"):
             value = self.request.query_params.get(field)
             if value:

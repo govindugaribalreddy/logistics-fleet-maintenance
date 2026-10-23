@@ -35,4 +35,9 @@ class ServiceRecordSerializer(serializers.ModelSerializer):
         mileage = attrs.get("mileage")
         if vehicle and mileage is not None and mileage < 0:
             raise serializers.ValidationError({"mileage": "Mileage cannot be negative."})
+        request = self.context.get("request")
+        if request and request.user.is_authenticated and request.user.groups.filter(name="Technician").exists():
+            technician = attrs.get("technician")
+            if technician is None or technician.email.lower() != request.user.email.lower():
+                raise serializers.ValidationError({"technician": "Technicians may only create records assigned to themselves."})
         return attrs

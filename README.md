@@ -73,4 +73,20 @@ To remove the persisted development database as well:
 docker compose down -v
 ```
 
-Redis, RabbitMQ, Celery, Prometheus, and Grafana are intentionally not included yet. Fleet features, database models, and authentication are also not included.
+Redis, RabbitMQ, Celery, Prometheus, and Grafana are intentionally not included yet. Automated fleet scheduling is also not included.
+
+## Authentication and roles
+
+All API endpoints require an authenticated Django user. The API accepts Django Session authentication and HTTP Basic authentication. Roles are represented by Django Groups with these exact names:
+
+- `Fleet Manager`: full vehicle and service-record management access.
+- `Technician`: read access to fleet reference data and access only to service records assigned to the technician whose email matches the user email. Technicians may create their own service records.
+- `Read-only Viewer`: read-only access to API data.
+
+Create an administrator interactively; Django prompts for the username and password so no credentials are stored in source code:
+
+```bash
+docker compose run --rm web python manage.py createsuperuser
+```
+
+After signing in to Django admin, create the three Groups above and assign users to the appropriate group. For local development without Docker, run the same command from `backend/` inside the activated virtual environment. Authentication is intentionally limited to Django-supported mechanisms for now; token/JWT authentication can be added later without changing the role model.

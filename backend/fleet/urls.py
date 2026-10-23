@@ -7,9 +7,6 @@ from .views import MaintenanceTypeViewSet, ServiceRecordViewSet, TechnicianViewS
 
 
 class HealthView(APIView):
-    authentication_classes = []
-    permission_classes = []
-
     def get(self, request):
         return Response({"status": "ok"})
 

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 from rest_framework.test import APIClient
+from django.contrib.auth.models import Group, User
 
 from fleet.models import MaintenanceType, ServiceRecord, Technician, Vehicle
 
@@ -10,7 +11,11 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def api_client():
-    return APIClient()
+    user = User.objects.create_user(username="manager", password="test-password")
+    user.groups.add(Group.objects.create(name="Fleet Manager"))
+    client = APIClient()
+    client.force_authenticate(user=user)
+    return client
 
 
 @pytest.fixture
