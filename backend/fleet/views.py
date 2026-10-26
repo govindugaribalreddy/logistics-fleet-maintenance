@@ -2,10 +2,10 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.exceptions import APIException
 from rest_framework.filters import OrderingFilter, SearchFilter
 
-from .models import MaintenanceType, ServiceRecord, Technician, Vehicle
+from .models import MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
 from .pagination import FleetPagination
 from .permissions import FleetRolePermission, has_role, TECHNICIAN
-from .serializers import MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleSerializer
+from .serializers import MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer
 
 
 class ConflictError(APIException):
@@ -87,5 +87,31 @@ class ServiceRecordViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, views
             value = self.request.query_params.get(field)
             if value:
                 queryset = queryset.filter(**{f"{field}_id": value})
+        return queryset
+
+
+class VehicleReadingViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):
+    queryset = VehicleReading.objects.select_related("vehicle").all()
+    serializer_class = VehicleReadingSerializer
+    pagination_class = FleetPagination
+    filter_backends = (OrderingFilter,)
+    ordering_fields = ("recorded_at", "mileage", "engine_hours", "created_at")
+    ordering = ("-recorded_at", "-id")
+    permission_classes = (FleetRolePermission,)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if has_role(self.request.user, TECHNICIAN):
+            queryset = queryset.filter(vehicle__service_records__technician__email__iexact=self.request.user.email).distinct()
+        for field in ("vehicle", "source"):
+            value = self.request.query_params.get(field)
+            if value:
+                queryset = queryset.filter(**{field if field == "source" else f"{field}_id": value})
+        recorded_after = self.request.query_params.get("recorded_after")
+        if recorded_after:
+            queryset = queryset.filter(recorded_at__gte=recorded_after)
+        recorded_before = self.request.query_params.get("recorded_before")
+        if recorded_before:
+            queryset = queryset.filter(recorded_at__lte=recorded_before)
         return queryset
 

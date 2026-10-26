@@ -1,6 +1,7 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import MaintenanceType, ServiceRecord, Technician, Vehicle
+from .models import MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -28,7 +29,7 @@ class ServiceRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceRecord
         fields = "__all__"
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at", "total_cost")
 
     def validate(self, attrs):
         vehicle = attrs.get("vehicle")
@@ -41,3 +42,22 @@ class ServiceRecordSerializer(serializers.ModelSerializer):
             if technician is None or technician.email.lower() != request.user.email.lower():
                 raise serializers.ValidationError({"technician": "Technicians may only create records assigned to themselves."})
         return attrs
+
+
+class VehicleReadingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VehicleReading
+        fields = "__all__"
+        read_only_fields = ("id", "created_at")
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        vehicle = validated_data.get("vehicle")
+        if request and request.user.is_authenticated and request.user.groups.filter(name="Technician").exists():
+            if not vehicle.service_records.filter(technician__email__iexact=request.user.email).exists():
+                raise serializers.ValidationError({"vehicle": "Technicians may only record readings for assigned vehicles."})
+        try:
+            validated_data["vehicle_id"] = validated_data.pop("vehicle").id
+            return VehicleReading.record(**validated_data)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"reading": exc.messages}) from exc

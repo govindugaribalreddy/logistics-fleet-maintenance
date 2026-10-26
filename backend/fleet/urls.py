@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .views import MaintenanceTypeViewSet, ServiceRecordViewSet, TechnicianViewSet, VehicleViewSet
+from .views import MaintenanceTypeViewSet, ServiceRecordViewSet, TechnicianViewSet, VehicleReadingViewSet, VehicleViewSet
 
 
 class HealthView(APIView):
@@ -16,5 +16,6 @@ router.register("vehicles", VehicleViewSet, basename="vehicle")
 router.register("technicians", TechnicianViewSet, basename="technician")
 router.register("maintenance-types", MaintenanceTypeViewSet, basename="maintenance-type")
 router.register("service-records", ServiceRecordViewSet, basename="service-record")
+router.register("readings", VehicleReadingViewSet, basename="reading")
 
 urlpatterns = [path("health/", HealthView.as_view(), name="health"), *router.urls]

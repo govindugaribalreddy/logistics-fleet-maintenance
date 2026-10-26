@@ -30,4 +30,8 @@ class FleetRolePermission(BasePermission):
             if has_role(request.user, TECHNICIAN):
                 return request.method in {"GET", "HEAD", "OPTIONS", "POST"}
             return has_role(request.user, READ_ONLY_VIEWER) and request.method in {"GET", "HEAD", "OPTIONS"}
+        if view.basename == "reading":
+            if has_role(request.user, TECHNICIAN):
+                return request.method in {"GET", "HEAD", "OPTIONS", "POST"}
+            return has_role(request.user, READ_ONLY_VIEWER) and request.method in {"GET", "HEAD", "OPTIONS"}
         return False

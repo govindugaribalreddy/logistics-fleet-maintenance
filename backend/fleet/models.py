@@ -2,6 +2,9 @@ from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 
 class Vehicle(models.Model):
@@ -36,6 +39,56 @@ class Vehicle(models.Model):
 
     def __str__(self):
         return self.vehicle_identifier
+
+
+class VehicleReading(models.Model):
+    class Source(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        SERVICE_RECORD = "service_record", "Service record"
+        TELEMATICS = "telematics", "Telematics"
+        IMPORT = "import", "Import"
+
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="readings")
+    recorded_at = models.DateTimeField(default=timezone.now)
+    mileage = models.PositiveIntegerField(validators=[MinValueValidator(0)])
+    engine_hours = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    source = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-recorded_at", "-id"]
+        indexes = [
+            models.Index(fields=["vehicle", "-recorded_at"]),
+            models.Index(fields=["source", "-recorded_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(mileage__gte=0), name="reading_mileage_nonnegative"),
+            models.CheckConstraint(condition=models.Q(engine_hours__gte=0), name="reading_engine_hours_nonnegative"),
+        ]
+
+    @classmethod
+    def record(cls, *, vehicle_id, mileage, engine_hours, source=Source.MANUAL, recorded_at=None):
+        """Accept a reading and update the vehicle snapshot atomically."""
+        with transaction.atomic():
+            vehicle = Vehicle.objects.select_for_update().get(pk=vehicle_id)
+            if mileage < vehicle.mileage or engine_hours < vehicle.engine_hours:
+                raise ValidationError("Accepted vehicle readings cannot decrease.")
+            reading = cls.objects.create(
+                vehicle=vehicle,
+                mileage=mileage,
+                engine_hours=engine_hours,
+                source=source,
+                recorded_at=recorded_at or timezone.now(),
+            )
+            Vehicle.objects.filter(pk=vehicle.pk).update(
+                mileage=mileage,
+                engine_hours=engine_hours,
+                updated_at=timezone.now(),
+            )
+            return reading
+
+    def __str__(self):
+        return f"{self.vehicle} @ {self.recorded_at.isoformat()}"
 
 
 class Technician(models.Model):
@@ -108,3 +161,7 @@ class ServiceRecord(models.Model):
 
     def __str__(self):
         return f"{self.vehicle} - {self.service_date} - {self.service_type}"
+
+    def save(self, *args, **kwargs):
+        self.total_cost = self.parts_cost + self.labor_cost
+        super().save(*args, **kwargs)
