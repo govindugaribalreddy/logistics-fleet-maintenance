@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -128,6 +129,97 @@ class MaintenanceType(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class MaintenancePlan(models.Model):
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="maintenance_plans")
+    maintenance_type = models.ForeignKey(MaintenanceType, on_delete=models.PROTECT, related_name="vehicle_plans")
+    mileage_interval = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+    engine_hour_interval = models.DecimalField(null=True, blank=True, max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    calendar_interval_days = models.PositiveIntegerField(null=True, blank=True, validators=[MinValueValidator(1)])
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["vehicle", "maintenance_type"]
+        constraints = [
+            models.UniqueConstraint(fields=["vehicle", "maintenance_type"], name="unique_vehicle_maintenance_plan"),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(mileage_interval__isnull=True)
+                        | models.Q(mileage_interval__gt=0)
+                    )
+                    & (
+                        models.Q(engine_hour_interval__isnull=True)
+                        | models.Q(engine_hour_interval__gt=0)
+                    )
+                    & (
+                        models.Q(calendar_interval_days__isnull=True)
+                        | models.Q(calendar_interval_days__gt=0)
+                    )
+                    & ~models.Q(
+                        mileage_interval__isnull=True,
+                        engine_hour_interval__isnull=True,
+                        calendar_interval_days__isnull=True,
+                    )
+                ),
+                name="maintenance_plan_has_schedule_basis",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["vehicle", "enabled"]),
+            models.Index(fields=["maintenance_type", "enabled"]),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not any((self.mileage_interval, self.engine_hour_interval, self.calendar_interval_days)):
+            raise ValidationError("At least one positive scheduling interval is required.")
+        for field in ("mileage_interval", "engine_hour_interval", "calendar_interval_days"):
+            value = getattr(self, field)
+            if value is not None and value <= 0:
+                raise ValidationError({field: "Scheduling intervals must be positive."})
+
+    @property
+    def latest_completed_service(self):
+        return self.vehicle.service_records.filter(service_type=self.maintenance_type).order_by("-service_date", "-created_at").first()
+
+    @property
+    def next_due_mileage(self):
+        if self.mileage_interval is None:
+            return None
+        baseline = self.latest_completed_service
+        return (baseline.mileage if baseline else self.vehicle.mileage) + self.mileage_interval
+
+    @property
+    def next_due_engine_hours(self):
+        if self.engine_hour_interval is None:
+            return None
+        baseline = self.latest_completed_service
+        return (baseline.engine_hours if baseline else self.vehicle.engine_hours) + self.engine_hour_interval
+
+    @property
+    def next_due_date(self):
+        if self.calendar_interval_days is None:
+            return None
+        baseline = self.latest_completed_service
+        baseline_date = baseline.service_date if baseline else self.created_at.date()
+        return baseline_date + timedelta(days=self.calendar_interval_days)
+
+    @property
+    def is_due(self):
+        if not self.enabled:
+            return False
+        due = False
+        if self.next_due_mileage is not None:
+            due = due or self.vehicle.mileage >= self.next_due_mileage
+        if self.next_due_engine_hours is not None:
+            due = due or self.vehicle.engine_hours >= self.next_due_engine_hours
+        if self.next_due_date is not None:
+            due = due or timezone.localdate() >= self.next_due_date
+        return due
 
 
 class ServiceRecord(models.Model):

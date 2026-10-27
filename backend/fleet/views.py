@@ -2,10 +2,10 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.exceptions import APIException
 from rest_framework.filters import OrderingFilter, SearchFilter
 
-from .models import MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
+from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
 from .pagination import FleetPagination
 from .permissions import FleetRolePermission, has_role, TECHNICIAN
-from .serializers import MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer
+from .serializers import MaintenancePlanSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer
 
 
 class ConflictError(APIException):
@@ -68,6 +68,28 @@ class MaintenanceTypeViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ("name", "description")
     ordering_fields = ("name", "created_at")
     permission_classes = (FleetRolePermission,)
+
+
+class MaintenancePlanViewSet(viewsets.ModelViewSet):
+    queryset = MaintenancePlan.objects.select_related("vehicle", "maintenance_type").all()
+    serializer_class = MaintenancePlanSerializer
+    pagination_class = FleetPagination
+    filter_backends = (OrderingFilter,)
+    ordering_fields = ("vehicle", "maintenance_type", "enabled", "created_at", "updated_at")
+    ordering = ("vehicle", "maintenance_type")
+    permission_classes = (FleetRolePermission,)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if has_role(self.request.user, TECHNICIAN):
+            queryset = queryset.filter(vehicle__service_records__technician__email__iexact=self.request.user.email).distinct()
+        vehicle = self.request.query_params.get("vehicle")
+        if vehicle:
+            queryset = queryset.filter(vehicle_id=vehicle)
+        enabled = self.request.query_params.get("enabled")
+        if enabled is not None:
+            queryset = queryset.filter(enabled=enabled.lower() in ("1", "true", "yes"))
+        return queryset
 
 
 class ServiceRecordViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet):

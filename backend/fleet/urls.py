@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .views import MaintenanceTypeViewSet, ServiceRecordViewSet, TechnicianViewSet, VehicleReadingViewSet, VehicleViewSet
+from .views import MaintenancePlanViewSet, MaintenanceTypeViewSet, ServiceRecordViewSet, TechnicianViewSet, VehicleReadingViewSet, VehicleViewSet
 
 
 class HealthView(APIView):
@@ -15,6 +15,7 @@ router = DefaultRouter()
 router.register("vehicles", VehicleViewSet, basename="vehicle")
 router.register("technicians", TechnicianViewSet, basename="technician")
 router.register("maintenance-types", MaintenanceTypeViewSet, basename="maintenance-type")
+router.register("maintenance-plans", MaintenancePlanViewSet, basename="maintenance-plan")
 router.register("service-records", ServiceRecordViewSet, basename="service-record")
 router.register("readings", VehicleReadingViewSet, basename="reading")
 

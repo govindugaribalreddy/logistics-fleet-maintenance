@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
+from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -23,6 +23,42 @@ class MaintenanceTypeSerializer(serializers.ModelSerializer):
         model = MaintenanceType
         fields = "__all__"
         read_only_fields = ("id", "created_at", "updated_at")
+
+
+class MaintenancePlanSerializer(serializers.ModelSerializer):
+    latest_completed_service = serializers.SerializerMethodField()
+    next_due_mileage = serializers.IntegerField(read_only=True)
+    next_due_engine_hours = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    next_due_date = serializers.DateField(read_only=True)
+    is_due = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = MaintenancePlan
+        fields = (
+            "id", "vehicle", "maintenance_type", "mileage_interval", "engine_hour_interval",
+            "calendar_interval_days", "enabled", "created_at", "updated_at", "latest_completed_service",
+            "next_due_mileage", "next_due_engine_hours", "next_due_date", "is_due",
+        )
+        read_only_fields = ("id", "created_at", "updated_at", "latest_completed_service", "next_due_mileage", "next_due_engine_hours", "next_due_date", "is_due")
+
+    def validate(self, attrs):
+        current = self.instance
+        for field in ("mileage_interval", "engine_hour_interval", "calendar_interval_days"):
+            value = attrs.get(field)
+            if value is None and current is not None and field not in attrs:
+                value = getattr(current, field)
+            if value is not None and value <= 0:
+                raise serializers.ValidationError({field: "Scheduling intervals must be positive."})
+        if not any(
+            attrs.get(field, getattr(current, field, None))
+            for field in ("mileage_interval", "engine_hour_interval", "calendar_interval_days")
+        ):
+            raise serializers.ValidationError("At least one scheduling basis is required.")
+        return attrs
+
+    def get_latest_completed_service(self, obj):
+        service = obj.latest_completed_service
+        return service.id if service else None
 
 
 class ServiceRecordSerializer(serializers.ModelSerializer):
