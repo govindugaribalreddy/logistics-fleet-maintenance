@@ -37,3 +37,12 @@ class FleetRolePermission(BasePermission):
                 return request.method in {"GET", "HEAD", "OPTIONS", "POST"}
             return has_role(request.user, READ_ONLY_VIEWER) and request.method in {"GET", "HEAD", "OPTIONS"}
         return False
+
+
+class MaintenanceStatusPermission(BasePermission):
+    message = "An authenticated fleet role is required."
+
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and any(
+            has_role(request.user, role) for role in (FLEET_MANAGER, TECHNICIAN, READ_ONLY_VIEWER)
+        )

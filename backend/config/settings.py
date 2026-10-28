@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -60,6 +61,9 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+MAINTENANCE_UPCOMING_DAYS = int(os.getenv("MAINTENANCE_UPCOMING_DAYS", "30"))
+MAINTENANCE_UPCOMING_MILEAGE = int(os.getenv("MAINTENANCE_UPCOMING_MILEAGE", "500"))
+MAINTENANCE_UPCOMING_ENGINE_HOURS = Decimal(os.getenv("MAINTENANCE_UPCOMING_ENGINE_HOURS", "25"))
 
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "fleet.pagination.FleetPagination",

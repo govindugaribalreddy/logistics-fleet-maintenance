@@ -1,11 +1,16 @@
-from rest_framework import mixins, status, viewsets
+from decimal import Decimal
+
+from rest_framework import mixins, serializers, status, viewsets
+from rest_framework.views import APIView
+from rest_framework.response import Response
 from rest_framework.exceptions import APIException
 from rest_framework.filters import OrderingFilter, SearchFilter
 
 from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
 from .pagination import FleetPagination
-from .permissions import FleetRolePermission, has_role, TECHNICIAN
-from .serializers import MaintenancePlanSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer
+from .maintenance_status import classify_plans, maintenance_plan_queryset
+from .permissions import FleetRolePermission, MaintenanceStatusPermission, has_role, TECHNICIAN
+from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer
 
 
 class ConflictError(APIException):
@@ -136,4 +141,44 @@ class VehicleReadingViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, view
         if recorded_before:
             queryset = queryset.filter(recorded_at__lte=recorded_before)
         return queryset
+
+
+def _status_thresholds(request):
+    values = {}
+    for parameter, key, parser in (
+        ("upcoming_days", "upcoming_days", int),
+        ("upcoming_mileage", "upcoming_mileage", int),
+        ("upcoming_engine_hours", "upcoming_engine_hours", Decimal),
+    ):
+        raw = request.query_params.get(parameter)
+        if raw is not None:
+            try:
+                value = parser(raw)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError({parameter: "Must be a nonnegative number."})
+            if value < 0:
+                raise serializers.ValidationError({parameter: "Must be a nonnegative number."})
+            values[key] = value
+    return values
+
+
+class MaintenanceStatusView(APIView):
+    permission_classes = (MaintenanceStatusPermission,)
+
+    def get(self, request, vehicle_id=None, status_filter=None):
+        thresholds = _status_thresholds(request)
+        plans = maintenance_plan_queryset()
+        if has_role(request.user, TECHNICIAN):
+            plans = plans.filter(vehicle__service_records__technician__email__iexact=request.user.email).distinct()
+        if vehicle_id is not None:
+            plans = plans.filter(vehicle_id=vehicle_id)
+        results = classify_plans(plans, **thresholds)
+        requested_status = status_filter or request.query_params.get("status")
+        if requested_status == "upcoming":
+            results = [result for result in results if result["status"] in {"due_now", "due_soon"}]
+        elif requested_status == "overdue":
+            results = [result for result in results if result["status"] == "overdue"]
+        elif requested_status:
+            results = [result for result in results if result["status"] == requested_status]
+        return Response(MaintenanceStatusSerializer(results, many=True).data)
 

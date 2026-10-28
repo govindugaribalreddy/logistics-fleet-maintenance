@@ -97,3 +97,22 @@ class VehicleReadingSerializer(serializers.ModelSerializer):
             return VehicleReading.record(**validated_data)
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"reading": exc.messages}) from exc
+
+
+class MaintenanceStatusSerializer(serializers.Serializer):
+    plan_id = serializers.IntegerField(source="plan.id")
+    vehicle_id = serializers.IntegerField(source="vehicle.id")
+    vehicle_identifier = serializers.CharField(source="vehicle.vehicle_identifier")
+    maintenance_type_id = serializers.IntegerField(source="maintenance_type.id")
+    maintenance_type = serializers.CharField(source="maintenance_type.name")
+    status = serializers.CharField()
+    due_criteria = serializers.ListField(child=serializers.CharField())
+    criteria = serializers.ListField()
+    latest_service_id = serializers.SerializerMethodField()
+    next_due_mileage = serializers.IntegerField(allow_null=True)
+    next_due_engine_hours = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    next_due_date = serializers.DateField(allow_null=True)
+    evaluated_at = serializers.DateTimeField()
+
+    def get_latest_service_id(self, obj):
+        return obj["latest_service"].id if obj["latest_service"] else None
