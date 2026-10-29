@@ -255,3 +255,87 @@ class ServiceRecord(models.Model):
     def save(self, *args, **kwargs):
         self.total_cost = self.parts_cost + self.labor_cost
         super().save(*args, **kwargs)
+
+
+class WorkOrder(models.Model):
+    class Category(models.TextChoices):
+        PREVENTIVE = "preventive", "Preventive"
+        CORRECTIVE = "corrective", "Corrective"
+        INSPECTION = "inspection", "Inspection"
+        EMERGENCY = "emergency", "Emergency"
+        OTHER = "other", "Other"
+
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+        CRITICAL = "critical", "Critical"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        ASSIGNED = "assigned", "Assigned"
+        IN_PROGRESS = "in_progress", "In progress"
+        WAITING_FOR_PARTS = "waiting_for_parts", "Waiting for parts"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    VALID_TRANSITIONS = {
+        Status.OPEN: {Status.ASSIGNED, Status.CANCELLED},
+        Status.ASSIGNED: {Status.OPEN, Status.IN_PROGRESS, Status.CANCELLED},
+        Status.IN_PROGRESS: {Status.WAITING_FOR_PARTS, Status.COMPLETED, Status.CANCELLED},
+        Status.WAITING_FOR_PARTS: {Status.IN_PROGRESS, Status.CANCELLED},
+        Status.COMPLETED: set(),
+        Status.CANCELLED: set(),
+    }
+
+    work_order_number = models.CharField(max_length=50, unique=True)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="work_orders")
+    maintenance_plan = models.ForeignKey(MaintenancePlan, on_delete=models.SET_NULL, null=True, blank=True, related_name="work_orders")
+    category = models.CharField(max_length=20, choices=Category.choices)
+    priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
+    problem_description = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    reported_date = models.DateField(default=timezone.localdate)
+    target_completion_date = models.DateField(null=True, blank=True)
+    estimated_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-reported_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["vehicle", "status"]),
+            models.Index(fields=["status", "priority"]),
+            models.Index(fields=["target_completion_date", "status"]),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(estimated_cost__gte=0), name="work_order_estimated_cost_nonnegative"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not self.problem_description or not self.problem_description.strip():
+            raise ValidationError({"problem_description": "A problem description is required."})
+        if self.target_completion_date and self.target_completion_date < self.reported_date:
+            raise ValidationError({"target_completion_date": "Target completion cannot be before the reported date."})
+        if self.maintenance_plan_id and self.maintenance_plan.vehicle_id != self.vehicle_id:
+            raise ValidationError({"maintenance_plan": "The maintenance plan must belong to the selected vehicle."})
+
+    def can_transition_to(self, new_status):
+        return new_status == self.status or new_status in self.VALID_TRANSITIONS.get(self.status, set())
+
+    def transition_to(self, new_status):
+        if not self.can_transition_to(new_status):
+            raise ValidationError({"status": f"Cannot transition from {self.status} to {new_status}."})
+        self.status = new_status
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous_status = type(self).objects.only("status").get(pk=self.pk).status
+            if previous_status != self.status:
+                if self.status not in self.VALID_TRANSITIONS.get(previous_status, set()):
+                    raise ValidationError({"status": f"Cannot transition from {previous_status} to {self.status}."})
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.work_order_number

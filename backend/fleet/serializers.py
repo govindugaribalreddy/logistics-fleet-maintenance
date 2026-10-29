@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
+from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -116,3 +116,27 @@ class MaintenanceStatusSerializer(serializers.Serializer):
 
     def get_latest_service_id(self, obj):
         return obj["latest_service"].id if obj["latest_service"] else None
+
+
+class WorkOrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkOrder
+        fields = "__all__"
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        vehicle = attrs.get("vehicle", getattr(self.instance, "vehicle", None))
+        plan = attrs.get("maintenance_plan", getattr(self.instance, "maintenance_plan", None))
+        if plan and vehicle and plan.vehicle_id != vehicle.id:
+            raise serializers.ValidationError({"maintenance_plan": "The maintenance plan must belong to the selected vehicle."})
+        description = attrs.get("problem_description", getattr(self.instance, "problem_description", ""))
+        if not description or not description.strip():
+            raise serializers.ValidationError({"problem_description": "A problem description is required."})
+        reported_date = attrs.get("reported_date", getattr(self.instance, "reported_date", None))
+        target_date = attrs.get("target_completion_date", getattr(self.instance, "target_completion_date", None))
+        if target_date and reported_date and target_date < reported_date:
+            raise serializers.ValidationError({"target_completion_date": "Target completion cannot be before the reported date."})
+        if self.instance and "status" in attrs and attrs["status"] != self.instance.status:
+            if not self.instance.can_transition_to(attrs["status"]):
+                raise serializers.ValidationError({"status": f"Cannot transition from {self.instance.status} to {attrs['status']}."})
+        return attrs

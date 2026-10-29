@@ -6,11 +6,11 @@ from rest_framework.response import Response
 from rest_framework.exceptions import APIException
 from rest_framework.filters import OrderingFilter, SearchFilter
 
-from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading
+from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder
 from .pagination import FleetPagination
 from .maintenance_status import classify_plans, maintenance_plan_queryset
 from .permissions import FleetRolePermission, MaintenanceStatusPermission, has_role, TECHNICIAN
-from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer
+from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderSerializer
 
 
 class ConflictError(APIException):
@@ -140,6 +140,25 @@ class VehicleReadingViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, view
         recorded_before = self.request.query_params.get("recorded_before")
         if recorded_before:
             queryset = queryset.filter(recorded_at__lte=recorded_before)
+        return queryset
+
+
+class WorkOrderViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin):
+    queryset = WorkOrder.objects.select_related("vehicle", "maintenance_plan", "maintenance_plan__maintenance_type").all()
+    serializer_class = WorkOrderSerializer
+    pagination_class = FleetPagination
+    filter_backends = (SearchFilter, OrderingFilter)
+    search_fields = ("work_order_number", "problem_description", "vehicle__vehicle_identifier")
+    ordering_fields = ("reported_date", "target_completion_date", "priority", "status", "estimated_cost", "created_at")
+    ordering = ("-reported_date", "-created_at")
+    permission_classes = (FleetRolePermission,)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        for field in ("vehicle", "status", "priority", "category", "maintenance_plan"):
+            value = self.request.query_params.get(field)
+            if value:
+                queryset = queryset.filter(**{f"{field}_id" if field in {"vehicle", "maintenance_plan"} else field: value})
         return queryset
 
 

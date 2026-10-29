@@ -18,7 +18,9 @@ class FleetRolePermission(BasePermission):
             return False
         if has_role(request.user, FLEET_MANAGER):
             return True
-        if view.basename in {"technician", "maintenance-type", "maintenance-plan"}:
+        if view.basename in {"technician", "maintenance-type", "maintenance-plan", "work-order"}:
+            if view.basename == "work-order" and has_role(request.user, FLEET_MANAGER):
+                return request.method in {"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH"}
             if view.basename == "maintenance-plan" and has_role(request.user, TECHNICIAN):
                 return request.method in {"GET", "HEAD", "OPTIONS"}
             return request.method in {"GET", "HEAD", "OPTIONS"} and (
