@@ -291,6 +291,7 @@ class WorkOrder(models.Model):
     work_order_number = models.CharField(max_length=50, unique=True)
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="work_orders")
     maintenance_plan = models.ForeignKey(MaintenancePlan, on_delete=models.SET_NULL, null=True, blank=True, related_name="work_orders")
+    assigned_technician = models.ForeignKey(Technician, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_work_orders")
     category = models.CharField(max_length=20, choices=Category.choices)
     priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
     problem_description = models.TextField()
@@ -320,6 +321,8 @@ class WorkOrder(models.Model):
             raise ValidationError({"target_completion_date": "Target completion cannot be before the reported date."})
         if self.maintenance_plan_id and self.maintenance_plan.vehicle_id != self.vehicle_id:
             raise ValidationError({"maintenance_plan": "The maintenance plan must belong to the selected vehicle."})
+        if self.assigned_technician_id and not self.assigned_technician.active:
+            raise ValidationError({"assigned_technician": "Only active technicians can be assigned."})
 
     def can_transition_to(self, new_status):
         return new_status == self.status or new_status in self.VALID_TRANSITIONS.get(self.status, set())
@@ -328,6 +331,26 @@ class WorkOrder(models.Model):
         if not self.can_transition_to(new_status):
             raise ValidationError({"status": f"Cannot transition from {self.status} to {new_status}."})
         self.status = new_status
+
+    def assign_to(self, technician, acting_user):
+        """Assign or reassign under a row lock and write one immutable history row."""
+        if technician is not None and not technician.active:
+            raise ValidationError({"assigned_technician": "Only active technicians can be assigned."})
+        with transaction.atomic():
+            locked = type(self).objects.select_for_update().get(pk=self.pk)
+            previous_id = locked.assigned_technician_id
+            new_id = technician.id if technician else None
+            if previous_id == new_id:
+                return locked
+            type(self).objects.filter(pk=locked.pk).update(assigned_technician_id=new_id, updated_at=timezone.now())
+            WorkOrderAssignmentHistory.objects.create(
+                work_order=locked,
+                previous_technician_id=previous_id,
+                new_technician_id=new_id,
+                acting_user=acting_user,
+            )
+            self.assigned_technician_id = new_id
+            return self
 
     def save(self, *args, **kwargs):
         if self.pk:
@@ -339,3 +362,18 @@ class WorkOrder(models.Model):
 
     def __str__(self):
         return self.work_order_number
+
+
+class WorkOrderAssignmentHistory(models.Model):
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="assignment_history")
+    previous_technician = models.ForeignKey(Technician, on_delete=models.SET_NULL, null=True, blank=True, related_name="previous_work_order_assignments")
+    new_technician = models.ForeignKey(Technician, on_delete=models.SET_NULL, null=True, blank=True, related_name="new_work_order_assignments")
+    acting_user = models.ForeignKey("auth.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="work_order_assignment_changes")
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["changed_at", "id"]
+        indexes = [
+            models.Index(fields=["work_order", "changed_at"]),
+            models.Index(fields=["new_technician", "changed_at"]),
+        ]

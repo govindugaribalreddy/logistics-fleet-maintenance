@@ -1,7 +1,8 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 
-from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder
+from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderAssignmentHistory
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -119,9 +120,14 @@ class MaintenanceStatusSerializer(serializers.Serializer):
 
 
 class WorkOrderSerializer(serializers.ModelSerializer):
+    assignment_history = serializers.SerializerMethodField()
     class Meta:
         model = WorkOrder
-        fields = "__all__"
+        fields = (
+            "id", "work_order_number", "vehicle", "maintenance_plan", "assigned_technician", "category", "priority",
+            "problem_description", "status", "reported_date", "target_completion_date", "estimated_cost",
+            "created_at", "updated_at", "assignment_history",
+        )
         read_only_fields = ("id", "created_at", "updated_at")
 
     def validate(self, attrs):
@@ -129,6 +135,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         plan = attrs.get("maintenance_plan", getattr(self.instance, "maintenance_plan", None))
         if plan and vehicle and plan.vehicle_id != vehicle.id:
             raise serializers.ValidationError({"maintenance_plan": "The maintenance plan must belong to the selected vehicle."})
+        technician = attrs.get("assigned_technician", getattr(self.instance, "assigned_technician", None))
+        if technician and not technician.active:
+            raise serializers.ValidationError({"assigned_technician": "Only active technicians can be assigned."})
         description = attrs.get("problem_description", getattr(self.instance, "problem_description", ""))
         if not description or not description.strip():
             raise serializers.ValidationError({"problem_description": "A problem description is required."})
@@ -140,3 +149,43 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             if not self.instance.can_transition_to(attrs["status"]):
                 raise serializers.ValidationError({"status": f"Cannot transition from {self.instance.status} to {attrs['status']}."})
         return attrs
+
+    def get_assignment_history(self, obj):
+        return AssignmentHistorySerializer(obj.assignment_history.select_related("previous_technician", "new_technician", "acting_user").all(), many=True).data
+
+    def create(self, validated_data):
+        technician = validated_data.pop("assigned_technician", None)
+        request = self.context.get("request")
+        with transaction.atomic():
+            work_order = WorkOrder.objects.create(assigned_technician=technician, **validated_data)
+            if technician:
+                WorkOrderAssignmentHistory.objects.create(work_order=work_order, new_technician=technician, acting_user=request.user if request else None)
+        return work_order
+
+    def update(self, instance, validated_data):
+        technician_marker = object()
+        technician = validated_data.pop("assigned_technician", technician_marker)
+        with transaction.atomic():
+            if technician is not technician_marker:
+                instance.assign_to(technician, self.context["request"].user)
+                instance.refresh_from_db()
+            for key, value in validated_data.items():
+                setattr(instance, key, value)
+            instance.save()
+        return instance
+
+
+class AssignmentHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkOrderAssignmentHistory
+        fields = ("id", "previous_technician", "new_technician", "acting_user", "changed_at")
+        read_only_fields = ("id", "previous_technician", "new_technician", "acting_user", "changed_at")
+
+
+class WorkOrderAssignmentSerializer(serializers.Serializer):
+    technician = serializers.PrimaryKeyRelatedField(queryset=Technician.objects.all(), allow_null=True, required=False)
+
+    def validate_technician(self, value):
+        if value is not None and not value.active:
+            raise serializers.ValidationError("Only active technicians can be assigned.")
+        return value

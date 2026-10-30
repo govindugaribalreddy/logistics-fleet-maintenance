@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from rest_framework import mixins, serializers, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.exceptions import APIException
@@ -10,7 +11,7 @@ from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician,
 from .pagination import FleetPagination
 from .maintenance_status import classify_plans, maintenance_plan_queryset
 from .permissions import FleetRolePermission, MaintenanceStatusPermission, has_role, TECHNICIAN
-from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderSerializer
+from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderAssignmentSerializer, WorkOrderSerializer
 
 
 class ConflictError(APIException):
@@ -159,7 +160,24 @@ class WorkOrderViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Re
             value = self.request.query_params.get(field)
             if value:
                 queryset = queryset.filter(**{f"{field}_id" if field in {"vehicle", "maintenance_plan"} else field: value})
+        technician = self.request.query_params.get("technician")
+        if technician:
+            queryset = queryset.filter(assigned_technician_id=technician)
+        assignment_status = self.request.query_params.get("assignment_status")
+        if assignment_status == "assigned":
+            queryset = queryset.filter(assigned_technician__isnull=False)
+        elif assignment_status == "unassigned":
+            queryset = queryset.filter(assigned_technician__isnull=True)
         return queryset
+
+    @action(detail=True, methods=["post"], url_path="assign")
+    def assign(self, request, pk=None):
+        serializer = WorkOrderAssignmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        work_order = self.get_object()
+        work_order.assign_to(serializer.validated_data.get("technician"), request.user)
+        work_order.refresh_from_db()
+        return Response(self.get_serializer(work_order).data)
 
 
 def _status_thresholds(request):
