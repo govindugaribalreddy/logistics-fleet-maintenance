@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderAssignmentHistory
+from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderAssignmentHistory, WorkOrderExpense
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -121,12 +121,14 @@ class MaintenanceStatusSerializer(serializers.Serializer):
 
 class WorkOrderSerializer(serializers.ModelSerializer):
     assignment_history = serializers.SerializerMethodField()
+    expense_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     class Meta:
         model = WorkOrder
         fields = (
             "id", "work_order_number", "vehicle", "maintenance_plan", "assigned_technician", "category", "priority",
             "problem_description", "status", "reported_date", "target_completion_date", "estimated_cost",
             "created_at", "updated_at", "assignment_history",
+            "expense_total",
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
@@ -189,3 +191,21 @@ class WorkOrderAssignmentSerializer(serializers.Serializer):
         if value is not None and not value.active:
             raise serializers.ValidationError("Only active technicians can be assigned.")
         return value
+
+
+class WorkOrderExpenseSerializer(serializers.ModelSerializer):
+    total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = WorkOrderExpense
+        fields = ("id", "work_order", "expense_type", "description", "quantity", "unit_cost", "expense_date", "supplier", "reference", "created_at", "updated_at", "total")
+        read_only_fields = ("id", "created_at", "updated_at", "total")
+
+    def validate(self, attrs):
+        work_order = attrs.get("work_order", getattr(self.instance, "work_order", None))
+        description = attrs.get("description", getattr(self.instance, "description", ""))
+        if not description or not description.strip():
+            raise serializers.ValidationError({"description": "A description is required."})
+        if work_order and work_order.status == WorkOrder.Status.COMPLETED:
+            raise serializers.ValidationError("Expenses cannot be changed on a completed work order.")
+        return attrs

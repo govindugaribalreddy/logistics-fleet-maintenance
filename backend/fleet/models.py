@@ -1,5 +1,5 @@
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -363,6 +363,10 @@ class WorkOrder(models.Model):
     def __str__(self):
         return self.work_order_number
 
+    @property
+    def expense_total(self):
+        return sum((expense.total for expense in self.expenses.all()), Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
 
 class WorkOrderAssignmentHistory(models.Model):
     work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="assignment_history")
@@ -377,3 +381,52 @@ class WorkOrderAssignmentHistory(models.Model):
             models.Index(fields=["work_order", "changed_at"]),
             models.Index(fields=["new_technician", "changed_at"]),
         ]
+
+
+class WorkOrderExpense(models.Model):
+    class ExpenseType(models.TextChoices):
+        PARTS = "parts", "Parts"
+        LABOR = "labor", "Labor"
+        EXTERNAL_REPAIR = "external_repair", "External repair"
+        OTHER = "other", "Other"
+
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="expenses")
+    expense_type = models.CharField(max_length=20, choices=ExpenseType.choices)
+    description = models.CharField(max_length=255)
+    quantity = models.DecimalField(max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))])
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+    expense_date = models.DateField(default=timezone.localdate)
+    supplier = models.CharField(max_length=150, blank=True)
+    reference = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-expense_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["work_order", "expense_date"]),
+            models.Index(fields=["expense_type", "expense_date"]),
+        ]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(quantity__gt=0), name="work_order_expense_quantity_positive"),
+            models.CheckConstraint(condition=models.Q(unit_cost__gte=0), name="work_order_expense_unit_cost_nonnegative"),
+        ]
+
+    @property
+    def total(self):
+        return (self.quantity * self.unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    def clean(self):
+        super().clean()
+        if not self.description or not self.description.strip():
+            raise ValidationError({"description": "A description is required."})
+        if self.work_order_id and self.work_order.status == WorkOrder.Status.COMPLETED:
+            raise ValidationError("Expenses cannot be changed on a completed work order.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.only("work_order_id").get(pk=self.pk).work_order.status == WorkOrder.Status.COMPLETED:
+            raise ValidationError("Expenses cannot be changed on a completed work order.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.work_order.work_order_number} - {self.description}"

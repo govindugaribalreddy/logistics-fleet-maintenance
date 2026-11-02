@@ -7,11 +7,11 @@ from rest_framework.response import Response
 from rest_framework.exceptions import APIException
 from rest_framework.filters import OrderingFilter, SearchFilter
 
-from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder
+from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderExpense
 from .pagination import FleetPagination
 from .maintenance_status import classify_plans, maintenance_plan_queryset
 from .permissions import FleetRolePermission, MaintenanceStatusPermission, has_role, TECHNICIAN
-from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderAssignmentSerializer, WorkOrderSerializer
+from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderAssignmentSerializer, WorkOrderExpenseSerializer, WorkOrderSerializer
 
 
 class ConflictError(APIException):
@@ -178,6 +178,26 @@ class WorkOrderViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.Re
         work_order.assign_to(serializer.validated_data.get("technician"), request.user)
         work_order.refresh_from_db()
         return Response(self.get_serializer(work_order).data)
+
+
+class WorkOrderExpenseViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin):
+    queryset = WorkOrderExpense.objects.select_related("work_order").all()
+    serializer_class = WorkOrderExpenseSerializer
+    pagination_class = FleetPagination
+    filter_backends = (OrderingFilter,)
+    ordering_fields = ("expense_date", "expense_type", "quantity", "unit_cost", "created_at")
+    ordering = ("-expense_date", "-created_at")
+    permission_classes = (FleetRolePermission,)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        work_order = self.request.query_params.get("work_order")
+        if work_order:
+            queryset = queryset.filter(work_order_id=work_order)
+        expense_type = self.request.query_params.get("expense_type")
+        if expense_type:
+            queryset = queryset.filter(expense_type=expense_type)
+        return queryset
 
 
 def _status_thresholds(request):
