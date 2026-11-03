@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderAssignmentHistory, WorkOrderExpense
+from .models import DowntimeRecord, MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderAssignmentHistory, WorkOrderExpense
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -209,3 +209,61 @@ class WorkOrderExpenseSerializer(serializers.ModelSerializer):
         if work_order and work_order.status == WorkOrder.Status.COMPLETED:
             raise serializers.ValidationError("Expenses cannot be changed on a completed work order.")
         return attrs
+
+
+class DowntimeRecordSerializer(serializers.ModelSerializer):
+    duration_seconds = serializers.IntegerField(read_only=True, allow_null=True)
+    vehicle_available = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DowntimeRecord
+        fields = ("id", "vehicle", "start_time", "end_time", "reason", "work_order", "notes", "created_at", "updated_at", "duration_seconds", "vehicle_available")
+        read_only_fields = ("id", "created_at", "updated_at", "duration_seconds", "vehicle_available")
+
+    def validate(self, attrs):
+        vehicle = attrs.get("vehicle", getattr(self.instance, "vehicle", None))
+        work_order = attrs.get("work_order", getattr(self.instance, "work_order", None))
+        start_time = attrs.get("start_time", getattr(self.instance, "start_time", None))
+        end_time = attrs.get("end_time", getattr(self.instance, "end_time", None))
+        reason = attrs.get("reason", getattr(self.instance, "reason", ""))
+        if not reason or not reason.strip():
+            raise serializers.ValidationError({"reason": "A downtime reason is required."})
+        if end_time and start_time and end_time < start_time:
+            raise serializers.ValidationError({"end_time": "End time cannot be before start time."})
+        if work_order and vehicle and work_order.vehicle_id != vehicle.id:
+            raise serializers.ValidationError({"work_order": "The work order must belong to the selected vehicle."})
+        if work_order and work_order.status in {WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELLED}:
+            raise serializers.ValidationError({"work_order": "A completed or cancelled work order cannot be linked to downtime."})
+        return attrs
+
+    def create(self, validated_data):
+        with transaction.atomic():
+            vehicle = Vehicle.objects.select_for_update().get(pk=validated_data["vehicle"].pk)
+            existing = DowntimeRecord.objects.select_for_update().filter(vehicle=vehicle, end_time__isnull=True).first()
+            if existing:
+                return existing
+            work_order = validated_data.get("work_order")
+            if work_order:
+                if work_order.status == WorkOrder.Status.OPEN:
+                    work_order.transition_to(WorkOrder.Status.ASSIGNED)
+                    work_order.save()
+                if work_order.status == WorkOrder.Status.ASSIGNED:
+                    work_order.transition_to(WorkOrder.Status.IN_PROGRESS)
+                work_order.save()
+            return DowntimeRecord.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            instance = DowntimeRecord.objects.select_for_update().get(pk=instance.pk)
+            was_ongoing = instance.end_time is None
+            for key, value in validated_data.items():
+                setattr(instance, key, value)
+            instance.full_clean()
+            instance.save()
+            if was_ongoing and instance.end_time and instance.work_order and instance.work_order.status == WorkOrder.Status.IN_PROGRESS:
+                instance.work_order.transition_to(WorkOrder.Status.COMPLETED)
+                instance.work_order.save()
+            return instance
+
+    def get_vehicle_available(self, obj):
+        return obj.end_time is not None or not DowntimeRecord.objects.filter(vehicle=obj.vehicle, end_time__isnull=True).exclude(pk=obj.pk).exists()

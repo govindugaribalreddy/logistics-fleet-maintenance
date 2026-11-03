@@ -7,11 +7,11 @@ from rest_framework.response import Response
 from rest_framework.exceptions import APIException
 from rest_framework.filters import OrderingFilter, SearchFilter
 
-from .models import MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderExpense
+from .models import DowntimeRecord, MaintenancePlan, MaintenanceType, ServiceRecord, Technician, Vehicle, VehicleReading, WorkOrder, WorkOrderExpense
 from .pagination import FleetPagination
 from .maintenance_status import classify_plans, maintenance_plan_queryset
 from .permissions import FleetRolePermission, MaintenanceStatusPermission, has_role, TECHNICIAN
-from .serializers import MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderAssignmentSerializer, WorkOrderExpenseSerializer, WorkOrderSerializer
+from .serializers import DowntimeRecordSerializer, MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderAssignmentSerializer, WorkOrderExpenseSerializer, WorkOrderSerializer
 
 
 class ConflictError(APIException):
@@ -198,6 +198,41 @@ class WorkOrderExpenseViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mi
         if expense_type:
             queryset = queryset.filter(expense_type=expense_type)
         return queryset
+
+
+class DowntimeRecordViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin):
+    queryset = DowntimeRecord.objects.select_related("vehicle", "work_order").all()
+    serializer_class = DowntimeRecordSerializer
+    pagination_class = FleetPagination
+    filter_backends = (OrderingFilter,)
+    ordering_fields = ("start_time", "end_time", "vehicle", "created_at")
+    ordering = ("-start_time", "-id")
+    permission_classes = (FleetRolePermission,)
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        for field in ("vehicle", "work_order"):
+            value = self.request.query_params.get(field)
+            if value:
+                queryset = queryset.filter(**{f"{field}_id": value})
+        ongoing = self.request.query_params.get("ongoing")
+        if ongoing is not None:
+            queryset = queryset.filter(end_time__isnull=ongoing.lower() in ("1", "true", "yes"))
+        return queryset
+
+
+class VehicleAvailabilityView(APIView):
+    permission_classes = (MaintenanceStatusPermission,)
+
+    def get(self, request, vehicle_id):
+        vehicle = Vehicle.objects.get(pk=vehicle_id)
+        current = vehicle.downtime_records.filter(end_time__isnull=True).order_by("-start_time").first()
+        return Response({
+            "vehicle_id": vehicle.id,
+            "vehicle_identifier": vehicle.vehicle_identifier,
+            "available": current is None,
+            "current_downtime_id": current.id if current else None,
+        })
 
 
 def _status_thresholds(request):

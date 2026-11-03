@@ -41,6 +41,10 @@ class Vehicle(models.Model):
     def __str__(self):
         return self.vehicle_identifier
 
+    @property
+    def is_available(self):
+        return not self.downtime_records.filter(end_time__isnull=True).exists()
+
 
 class VehicleReading(models.Model):
     class Source(models.TextChoices):
@@ -430,3 +434,47 @@ class WorkOrderExpense(models.Model):
 
     def __str__(self):
         return f"{self.work_order.work_order_number} - {self.description}"
+
+
+class DowntimeRecord(models.Model):
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="downtime_records")
+    start_time = models.DateTimeField(default=timezone.now)
+    end_time = models.DateTimeField(null=True, blank=True)
+    reason = models.CharField(max_length=255)
+    work_order = models.ForeignKey(WorkOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name="downtime_records")
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-start_time", "-id"]
+        indexes = [
+            models.Index(fields=["vehicle", "-start_time"]),
+            models.Index(fields=["vehicle", "end_time"]),
+            models.Index(fields=["work_order", "start_time"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["vehicle"], condition=models.Q(end_time__isnull=True), name="one_ongoing_downtime_per_vehicle"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not self.reason or not self.reason.strip():
+            raise ValidationError({"reason": "A downtime reason is required."})
+        if self.end_time and self.end_time < self.start_time:
+            raise ValidationError({"end_time": "End time cannot be before start time."})
+        if self.work_order_id and self.work_order.vehicle_id != self.vehicle_id:
+            raise ValidationError({"work_order": "The work order must belong to the selected vehicle."})
+        if self.work_order_id and self.work_order.status in {WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELLED}:
+            raise ValidationError({"work_order": "A completed or cancelled work order cannot be linked to downtime."})
+
+    @property
+    def duration(self):
+        return self.end_time - self.start_time if self.end_time else None
+
+    @property
+    def duration_seconds(self):
+        return int(self.duration.total_seconds()) if self.duration else None
+
+    def __str__(self):
+        return f"{self.vehicle} - {self.start_time.isoformat()}"
