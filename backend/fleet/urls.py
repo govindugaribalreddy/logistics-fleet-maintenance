@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .views import DowntimeRecordViewSet, MaintenancePlanViewSet, MaintenanceStatusView, MaintenanceTypeViewSet, ServiceRecordViewSet, TechnicianViewSet, VehicleAvailabilityView, VehicleReadingViewSet, VehicleViewSet, WorkOrderExpenseViewSet, WorkOrderViewSet
+from .views import DowntimeRecordViewSet, MaintenancePlanViewSet, MaintenanceStatusView, MaintenanceTypeViewSet, RecurringProblemView, ServiceRecordViewSet, TechnicianViewSet, VehicleAvailabilityView, VehicleReadingViewSet, VehicleViewSet, WorkOrderExpenseViewSet, WorkOrderViewSet
 
 
 class HealthView(APIView):
@@ -28,5 +28,7 @@ urlpatterns = [
     path("maintenance-status/overdue/", MaintenanceStatusView.as_view(), {"status_filter": "overdue"}, name="maintenance-overdue"),
     path("vehicles/<int:vehicle_id>/maintenance-status/", MaintenanceStatusView.as_view(), name="vehicle-maintenance-status"),
     path("vehicles/<int:vehicle_id>/availability/", VehicleAvailabilityView.as_view(), name="vehicle-availability"),
+    path("recurring-problems/", RecurringProblemView.as_view(), name="recurring-problems"),
+    path("vehicles/<int:vehicle_id>/recurring-problems/", RecurringProblemView.as_view(), name="vehicle-recurring-problems"),
     *router.urls,
 ]

@@ -267,3 +267,15 @@ class DowntimeRecordSerializer(serializers.ModelSerializer):
 
     def get_vehicle_available(self, obj):
         return obj.end_time is not None or not DowntimeRecord.objects.filter(vehicle=obj.vehicle, end_time__isnull=True).exclude(pk=obj.pk).exists()
+
+
+class RecurringProblemSerializer(serializers.Serializer):
+    vehicle_id = serializers.IntegerField()
+    vehicle_identifier = serializers.CharField()
+    issue_category = serializers.CharField()
+    repeat_repair_count = serializers.IntegerField()
+    work_order_ids = serializers.ListField(child=serializers.IntegerField())
+    total_repair_expenses = serializers.DecimalField(max_digits=12, decimal_places=2)
+    downtime_seconds = serializers.IntegerField()
+    window_start = serializers.DateField()
+    window_end = serializers.DateField()

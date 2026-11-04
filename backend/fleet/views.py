@@ -4,6 +4,7 @@ from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import APIException
 from rest_framework.filters import OrderingFilter, SearchFilter
 
@@ -11,7 +12,8 @@ from .models import DowntimeRecord, MaintenancePlan, MaintenanceType, ServiceRec
 from .pagination import FleetPagination
 from .maintenance_status import classify_plans, maintenance_plan_queryset
 from .permissions import FleetRolePermission, MaintenanceStatusPermission, has_role, TECHNICIAN
-from .serializers import DowntimeRecordSerializer, MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderAssignmentSerializer, WorkOrderExpenseSerializer, WorkOrderSerializer
+from .recurring_problems import DEFAULT_WINDOW_DAYS, analyze_recurring_problems
+from .serializers import DowntimeRecordSerializer, MaintenancePlanSerializer, MaintenanceStatusSerializer, MaintenanceTypeSerializer, RecurringProblemSerializer, ServiceRecordSerializer, TechnicianSerializer, VehicleReadingSerializer, VehicleSerializer, WorkOrderAssignmentSerializer, WorkOrderExpenseSerializer, WorkOrderSerializer
 
 
 class ConflictError(APIException):
@@ -233,6 +235,23 @@ class VehicleAvailabilityView(APIView):
             "available": current is None,
             "current_downtime_id": current.id if current else None,
         })
+
+
+class RecurringProblemView(APIView):
+    permission_classes = (MaintenanceStatusPermission,)
+
+    def get(self, request, vehicle_id=None):
+        raw_days = request.query_params.get("days", str(DEFAULT_WINDOW_DAYS))
+        try:
+            days = int(raw_days)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({"days": "Must be a positive integer."})
+        if days <= 0:
+            raise serializers.ValidationError({"days": "Must be a positive integer."})
+        if vehicle_id is not None:
+            get_object_or_404(Vehicle, pk=vehicle_id)
+        results = analyze_recurring_problems(vehicle_id=vehicle_id, days=days)
+        return Response(RecurringProblemSerializer(results, many=True).data)
 
 
 def _status_thresholds(request):
